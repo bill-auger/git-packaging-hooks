@@ -1,0 +1,86 @@
+#!/bin/bash
+
+#  git-packaging-hooks - git hooks to semi-automate releases and distro packaging
+#
+#  Copyright 2017 bill-auger <https://github.com/bill-auger/git-packaging-hooks/issues>
+#
+#  git-packaging-hooks is free software: you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License version 3 as published by
+#  the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  git-packaging-hooks is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License version 3
+#  along with git-packaging-hooks.  If not, see <http://www.gnu.org/licenses/>.
+
+
+readonly HOOKS_DIR=$(git config --local core.hooksPath)
+readonly COMMON_DEFS_FILE=${HOOKS_DIR}/common.sh.inc
+source $COMMON_DEFS_FILE
+[ ! -f $COMMON_DEFS_FILE ] && Error "missing ${HOOKS_DIR}/common.sh.inc - aborting commit" && exit 1
+[ "$(grep --invert-match "^\s*#" .git/COMMIT_EDITMSG)" ] || exit 1
+
+
+if   (($IS_DEVELOPMENT_BRANCH))
+then TraceStage "running generic pre-commit hooks"
+
+     # prune existing minor version tag on HEAD and store for the post stage
+     if   (($IS_AMEND_COMMIT)) && [ "$MINOR_VERSION_REF" == "$HEAD_REF" ]
+     then orphaned_tags=$(git tag --points-at HEAD)
+          git tag --delete $orphaned_tags
+          echo "$MINOR_VERSION_TAG $VERSION_STRING $orphaned_tags" | tr " " "\n" > $TAGS_FILE
+     fi
+
+     # inject version string into build files
+     TraceStep "upgrading version to '$VERSION_STRING'"
+     ac_init_params="[$UPSTREAM_NAME], [$VERSION], [${BUG_URL//\//\\\/}]"
+     sed --in-place "s/^AC_INIT(.*$/AC_INIT($ac_init_params)/" $VERSION_FILE
+elif (($IS_PACKAGING_BRANCH))
+then if   [ "$LAST_REVISION_TAG" != "$HIGHEST_REV_TAG" ]
+     then Error "aborting commit"                                                       \
+                "       The greatest revision tag '$HIGHEST_REV_TAG' is not reachable." \
+                "       The greatest reachable revision tag is '$LAST_REVISION_TAG'."   \
+                "       Did you forget to rebase?"
+          exit 1
+     elif (($IS_AMEND_COMMIT)) && [ "$LAST_REVISION_REF" == "$HEAD_REF" ]
+     then Error "aborting amend commit"                                            \
+                "       This commit would detach the packaging branch from"        \
+                "       the greatest reachable revision tag '$LAST_REVISION_TAG'." \
+                "       Did you forget to rebase?"
+          exit 1
+     else (($IS_AMEND_COMMIT)) && exit 0
+     fi
+
+     TraceStage "running packaging-specific pre-commit hooks"
+
+     # cleanup any transient files
+     TraceStep "preparing the packaging environment"
+     rm $TARBALL_FILE 2> /dev/null
+     for remote_file in ${CLEANUP_FILES[@]} ; do rm $remote_file 2> /dev/null ; done ;
+
+     # inject version string into packaging files
+     TraceStep "updating packaging files to latest version"
+     for template_file in ${TEMPLATE_FILES[@]} ; do cp ${template_file}.in $template_file ; done ;
+     cp $SERVICE_FILE.in                                             $SERVICE_FILE
+     sed --in-place "s/\/.*</\/$VERSION_STRING\.tar\.gz</"           $SERVICE_FILE
+     cp $SPEC_FILE.in                                                $SPEC_FILE
+     sed --in-place "s/^Version:.*$/Version:       $VERSION/"        $SPEC_FILE
+     echo "%changelog"                                            >> $SPEC_FILE
+     echo "* $(date '+%a %b %d %Y') $GIT_USER"                    >> $SPEC_FILE
+     echo "- $VERSION_STRING"                                     >> $SPEC_FILE
+     cp $DSC_FILE.in                                                 $DSC_FILE
+     sed --in-place "s/^Version:.*$/Version:           $VERSION-1/"  $DSC_FILE
+     cp $PKGBUILD_FILE.in                                            $PKGBUILD_FILE
+     sed --in-place "s/^pkgver=.*$/pkgver=$VERSION/"                 $PKGBUILD_FILE
+     sed --in-place "s/^validpgpkeys=.*$/validpgpkeys=('$GPG_KEY')/" $PKGBUILD_FILE
+
+     dch --package $DEBIAN_NAME --newversion ${VERSION}-1 'updated to new upstream version'
+
+     # validations
+     for debian_file in ${DEBIAN_FILES[@]} ; do [ "$(ls $debian_file)" ] || exit 1 ; done ;
+     for obs_file    in ${OBS_FILES[@]}    ; do [ "$(ls $obs_file   )" ] || exit 1 ; done ;
+fi

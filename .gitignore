@@ -1,0 +1,9 @@
+*
+!.gitignore
+!commit-msg
+!common.sh.inc
+!debug-constants.sh.inc
+!debug-remote-files.sh.inc
+!LICENSE
+!post-commit
+!README.md
