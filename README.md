@@ -1,33 +1,53 @@
 
 these files are a set of git hooks to semi-automate the following:
 
-  * injecting semantic version strings into the program
-  * releases on github
+  * injecting semantic version strings into the program source code
+  * signed releases on github
   * packaging for debian
-  * packaging on the OpenSUSE Build Service
+  * packaging on the opensuse build service (OBS)
 
 
 initial local configuration:
 
-* ensure that the git-packaging-hooks are installed locally  
+* configure git to use these git-packaging-hooks  
   => $ git config --local core.hooksPath /path/to/git-packaging-hooks/
-* ensure that `sbuild` is installed and your user is in the 'sbuild' group
-  => $ sudo apt install sbuild
-  => $ sudo sbuild-adduser $USER
+* define the project-specific constants in project-defs.sh.inc
+* ensure that the project debian/ and obs/ directories are on the `$PACKAGING_BRANCH` only
+* copy (or adapt) the gbp.conf from this directory to the project debian/ directory
+* ensure that `git config user.name` and `git config user.signingkey` are set
+* ensure that `curl` and `piuparts` are installed  
+  => $ su -c "apt-get install curl piuparts"
+* for DEB_BUILD_TOOL='debuild' ensure that `devscripts` is installed  
+  => $ su -c "apt-get install devscripts"
+* for DEB_BUILD_TOOL='sbuild' ensure that `sbuild` and `schroot` are installed  
+  and that your user is in the 'sbuild' group  
+  => $ su -c "apt-get install sbuild schroot"  
+  => $ su -c "sbuild-adduser $USER"  
+  => (optional) set alternate chroot directory  
+  => $ su -c "mkdir -p ${$DEB_SBUILD_DIR}  
+  => $ su -c "rm -rf /run/schroot"  
+  => $ su -c "ln -s $DEB_SBUILD_DIR /run/schroot"
+* for DEB_BUILD_TOOL='gbp' ensure that `git-buildpackage` is installed  
+  => ensure that your user can sudo  
+  => $ sudo apt-get install debhelper fakeroot git-buildpackage cowbuilder  
+  => (optional) set alternate chroot directory  
+  => $ sudo mkdir -p $DEB_PBUILDER_DIR  
+  => $ sudo rm -rf /var/cache/pbuilder  
+  => $ sudo ln -s $DEB_PBUILDER_DIR /var/cache/pbuilder
 
 
 for each release version:
 
-* ensure that the appropriate tag 'vMAJOR.MINOR' exists on the development branch  
+* checkout the `$STAGING_BRANCH` and pull/merge the release state
+* ensure that the appropriate tag 'vMAJOR.MINOR' exists on the `$STAGING_BRANCH`  
   or add a new tag 'vMAJOR.MINOR' if major or minor version should change
-* if the new tag 'vMAJOR.MINOR' was just added to the current HEAD  
-  then amend that HEAD commit to trigger the git hooks
+* amend the `$STAGING_BRANCH` HEAD commit to trigger the git hooks
 * verify that the git hook has put a tag of the form 'vMAJOR.MINOR.REV' on the HEAD  
   where REV is n_commits after the nearest 'vMAJOR.MINOR' tag
-* checkout the 'packaging' branch to enable the packaging-specific git hooks
-* rebase the 'packaging' branch onto the previous HEAD
-* in debian/changelog  
-  => add new entry for this version
+* checkout the `$PACKAGING_BRANCH` to enable the packaging-specific git hooks
+* rebase the `$PACKAGING_BRANCH` onto the previous HEAD
+* (optional) in debian/changelog  
+  => add detailed entry for this version to suppress the automated entry
 
 
 if build or install steps have changed:
@@ -62,48 +82,51 @@ if dependencies have changed:
 
 prepare packaging files:
 
-* commit at least the changelog to trigger the git hooks  
+* add a new commit to trigger the git hooks  
   => $ git add --all  
-  => $ git commit --allow-empty-message
+  => $ git commit --allow-empty --allow-empty-message --message=''
 
 
-_NOTE: after each commit to the `$DEVELOPMENT_BRANCH` branch:_
+_NOTE: after each commit to the `$STAGING_BRANCH`:_
 
 * the version string will be written into the configure.ac file
 * any git tags of the form 'vMAJOR.MINOR.REV' that are not merged into master will be deleted
 * a git tag 'vMAJOR.MINOR.REV' will be put on the HEAD  
   where REV is n_commits after the nearest 'vMAJOR.MINOR' tag
+* autoreconf will be run, the project will be rebuilt and installchecked
+* the commit will be rejected if the re-config/re-build fails
+* the commit will be amended with '--gpg-sign' if it was not already GPG signed  
+  or if any tracked files had been changed by the re-config/re-build
 
 
-_NOTE: after each commit to the `$PACKAGING_BRANCH` branch:_
+_NOTE: after each commit to the `$PACKAGING_BRANCH`:_
 
-* all git tags are preserved
-* the \_service, .spec, .dsc, and PKGBUILD files will be copied from their corresponding *.in templates
+* all existing git tags are preserved
+* rebasing and amend commits are non-eventful and will not trigger any of the following actions
+* the \_service, .spec, .dsc, and PKGBUILD files will be created from their corresponding *.in templates
 * version strings will be written into the \_service, .spec, .dsc, and PKGBUILD files
 * checksums will be written into the .dsc and PKGBUILD files
 * a tarball named 'PROJECT_MAJOR.MINOR.REV.orig.tar.gz' will be in the parent directory
-* the .spec and .dsc recipes will be coupled to this tarball and checksums
-* the PKGBUILD recipe will be coupled to this tarball, checksums, and signatures
-* all files in the ./obs/ directory (except *.in) will be copied into the OSC directory
-* the HEAD commit will be amended and signed
-* the commit message will be 'update packaging files to vMAJOR.MINOR.REV' (a.k.a. `$COMMIT_MSG`)
-* the development branch, packaging branch, and tags will pushed to github
+* signatures will be generated for the tarball and PKGBUILD
+* the .spec and .dsc recipes will be coupled to this tarball
+* the .dsc recipe will be coupled to this tarball checksums
+* the PKGBUILD recipe will be coupled to this tarball, checksum, and signatures
+* a new entry will be added to the debian/changelog if one does not exist for this version
+* the new HEAD commit will be amended and signed with the commit message as `$GIT_COMMIT_MSG`
+* the `$STAGING_BRANCH`, `$PACKAGING_BRANCH`, and tags will pushed to github
 * the PKGBUILD and signatures will be uploaded to the 'vMAJOR.MINOR.REV' github "tag release"
-* the tarball, PKGBUILD, and signatures will be verified as identical to the github "tag release"
-* rebasing and amend commits are non-eventful and will not trigger any of the above actions
+* the local tarball, PKGBUILD, and signatures will be verified as identical to the github "tag release"
+* all files in the ./obs/ directory (except *.in) will be copied into the `$OSC_DIR`
+* the remote OBS build will be triggered with a checkin
+* a debian package will be built, installed, and validated in a clean chroot
 
 
-packaging:
+finalize the release:
 
-* OSC local build - e.g.  
-  => $ osc build openSUSE_Tumbleweed i586   ./`$OBS_NAME`.spec  
-  => $ osc build Debian_8.0          x86_64 ./`$OBS_NAME`.dsc
-* tweak any of the preceding steps as necessary until everything rocks sweetly
-* OSC commit to the OBS build server for production build
-
-
-commit packaging files to git:
-
-* duplicate any changes in the OSC directory in ./obs/ directory and amend commit
-* checkout the master branch and fast-forward to the development branch  
-  => $ git checkout master && git merge development
+* tweak any debian/ or OSC files and rebuild manually with deb tools and/or osc  
+  as necessary until everything is rocking sweetly
+* duplicate any manual changes to the OSC files in the ./obs/ files and amend commit  
+  => $ git add --all  
+  => $ git commit --amend
+* checkout the master branch and fast-forward to the `$STAGING_BRANCH`  
+  => $ git checkout master && git merge `$STAGING_BRANCH` && git push upstream master

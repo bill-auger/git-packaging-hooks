@@ -2,8 +2,10 @@
 !.gitignore
 !commit-msg
 !common.sh.inc
+!gbp.conf
 !debug-constants.sh.inc
 !debug-remote-files.sh.inc
 !LICENSE
 !post-commit
+!project-defs.sh.inc.example
 !README.md

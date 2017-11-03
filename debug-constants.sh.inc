@@ -19,8 +19,8 @@
 echo -e "\n==== DEBUG BEGIN ===="
 
 [ "$IS_AMEND_COMMIT"           == "1" ] && echo "!! IS_AMEND_COMMIT"           || echo "!  IS_AMEND_COMMIT"
-[ "$IS_POST_COMMIT_STAGE"      == "1" ] && echo "!! IS_POST_COMMIT_STAGE"      || echo "!  IS_POST_COMMIT_STAGE"
-[ "$IS_DEVELOPMENT_BRANCH"     == "1" ] && echo "!! IS_DEVELOPMENT_BRANCH"     || echo "!  IS_DEVELOPMENT_BRANCH"
+[ "$IS_PRE_COMMIT_STAGE"       == "1" ] && echo "!! IS_PRE_COMMIT_STAGE"       || echo "!  IS_PRE_COMMIT_STAGE"
+[ "$IS_STAGING_BRANCH"         == "1" ] && echo "!! IS_STAGING_BRANCH"         || echo "!  IS_STAGING_BRANCH"
 [ "$IS_PACKAGING_BRANCH"       == "1" ] && echo "!! IS_PACKAGING_BRANCH"       || echo "!  IS_PACKAGING_BRANCH"
 [ "$SHOULD_INCREMENT_REVISION" == "1" ] && echo "!! SHOULD_INCREMENT_REVISION" || echo "!  SHOULD_INCREMENT_REVISION"
 # echo "branch_tags=$branch_tags"
