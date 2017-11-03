@@ -6,6 +6,23 @@ these files are a set of git hooks to semi-automate the following:
   * packaging for debian
   * packaging on the opensuse build service (OBS)
 
+sources include graph:
+```
+* commit-msg
+  -> common.sh.inc
+     -> project-defs.sh.inc
+  -> staging-pre.sh.inc
+  -> packaging-pre.sh.inc
+* post-commit
+  -> common.sh.inc
+     -> project-defs.sh.inc
+  -> staging-post.sh.inc
+  -> packaging-post.sh.inc
+     -> github-post.sh.inc
+     -> obs-post.sh.inc
+     -> debian-post.sh.inc
+```
+
 
 initial local configuration:
 
