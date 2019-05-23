@@ -74,10 +74,12 @@ then (($IS_AMEND_COMMIT)) && exit 0
 
      TraceStage "running packaging-specific post-commit hooks"
 
+     ### github steps ###
+
      # implode tarball
      TraceStep "imploding tarball"
      rm $TARBALL_FILE $TARBALL_FILE.sig $PKGBUILD_FILE.sig 2> /dev/null
-     git archive --prefix=$TARBALL_INNER_DIR/ --output=$TARBALL_FILE $VERSION_STRING
+     git archive --prefix=$GITHUB_TARBALL_INNER_DIR/ --output=$TARBALL_FILE $VERSION_STRING
 
      # generate tarball metadata
      TraceStep "generating checksums"
@@ -107,9 +109,6 @@ then (($IS_AMEND_COMMIT)) && exit 0
      # sign tarball and PKGBUILD
      gpg --detach-sign --yes $TARBALL_FILE
      gpg --detach-sign --yes $PKGBUILD_FILE
-
-
-     ### github steps ###
 
      # create upstream tarball
      TraceStep "pushing staging branch, packaging branch, and revision tag to github"
@@ -176,8 +175,8 @@ then (($IS_AMEND_COMMIT)) && exit 0
 
      # download and verify github "tag release" tarball and PKGBUILD
      TraceStep "downloading remote tarball, PKGBUILD, and signatures"
-     curl $CURL_FETCH_ARGS $TARBALL_URL     ; curl $CURL_FETCH_ARGS $PKGBUILD_URL     ;
-     curl $CURL_FETCH_ARGS $TARBALL_SIG_URL ; curl $CURL_FETCH_ARGS $PKGBUILD_SIG_URL ;
+     curl $CURL_FETCH_ARGS $GITHUB_TARBALL_URL     ; curl $CURL_FETCH_ARGS $PKGBUILD_URL     ;
+     curl $CURL_FETCH_ARGS $GITHUB_TARBALL_SIG_URL ; curl $CURL_FETCH_ARGS $PKGBUILD_SIG_URL ;
      for remote_file in ${REMOTE_FILENAMES[@]}
      do  if [ -f $remote_file -a "$(stat --printf='%s' $remote_file)" != "9" ] # 'Not Found'
          then TraceStep "downloaded $remote_file"
@@ -198,6 +197,157 @@ then (($IS_AMEND_COMMIT)) && exit 0
           exit 1
      fi
 
+     ### gitlab steps ###
+
+     # implode tarball
+     TraceStep "imploding tarball"
+     rm $TARBALL_FILE $TARBALL_FILE.sig $PKGBUILD_FILE.sig 2> /dev/null
+     git archive --prefix=$GITLAB_TARBALL_INNER_DIR/ --output=$TARBALL_FILE $VERSION_STRING
+
+     # generate tarball metadata
+     TraceStep "generating checksums"
+     TARBALL_MD5SUM="$(   md5sum     $TARBALL_FILE | cut --delimiter=' ' --fields=1)"
+     TARBALL_SHA1SUM="$(  sha1sum    $TARBALL_FILE | cut --delimiter=' ' --fields=1)                        "
+     TARBALL_SHA256SUM="$(sha256sum  $TARBALL_FILE | cut --delimiter=' ' --fields=1)"
+     FILE_SIZE=$(         wc --bytes $TARBALL_FILE | cut --delimiter=' ' --fields=1)
+#      PKGBUILD_MD5SUMS="'$TARBALL_MD5SUM' SKIP SKIP"
+     PKGBUILD_MD5SUMS="'$TARBALL_MD5SUM'"
+
+     # inject tarball metadata into packaging files
+     TraceStep "preparing packaging files"
+     for dsc_file in ${DSC_FILES[@]}
+     do  echo "Checksums-Sha1:"                                         >> $dsc_file
+         echo " $TARBALL_SHA1SUM $FILE_SIZE $DEB_TARBALL_FILENAME"      >> $dsc_file
+         echo "Checksums-Sha256:"                                       >> $dsc_file
+         echo " $TARBALL_SHA256SUM $FILE_SIZE $DEB_TARBALL_FILENAME"    >> $dsc_file
+         echo "Files:"                                                  >> $dsc_file
+         echo " $FAUX_DSC_MD5SUM $FAUX_DSC_SIZE $DEB_TARBALL_FILENAME"  >> $dsc_file
+         echo " $FAUX_DSC_MD5SUM $FAUX_DSC_SIZE $DEB_DIFFBALL_FILENAME" >> $dsc_file
+     done
+     sed --in-place "s/^md5sums=.*$/md5sums=( $PKGBUILD_MD5SUMS )/"        $PKGBUILD_FILE
+
+     # set uniform commit message and ensure signed
+     git commit --gpg-sign --amend --allow-empty --message="$GIT_COMMIT_MSG" > /dev/null
+
+     # sign tarball and PKGBUILD
+     gpg --detach-sign --yes $TARBALL_FILE
+     gpg --detach-sign --yes $PKGBUILD_FILE
+
+     # create upstream tarball
+     TraceStep "pushing staging branch, packaging branch, and revision tag to github"
+     git push --force $REMOTE_NAME $STAGING_BRANCH $PACKAGING_BRANCH $VERSION_STRING 2> /dev/null
+
+     ## destroy any existing gitlab "tag release" with same tag
+     TraceStep "querying existing gitlab \"tag release\" '$VERSION_STRING'"
+     resp_json=$(curl $CURL_RESP_ARGS --header \"PRIVATE-TOKEN: $GITLAB_AUTH_TOKEN\" $GITLAB_API_URL/$VERSION_STRING)
+     tag_name=$(echo $resp_json | jq '.tag_name')
+     tag_name=${tag_name:1:-1}
+     if [[ $tag_name == $VERSION_STRING ]]
+     then TraceStep "deleting existing gitlab \"tag release\" - id: '$tag_name'"
+          resp_status=$(curl --request DELETE                                   \
+                             --header "PRIVATE-TOKEN: $GITLAB_AUTH_TOKEN" \
+                             --header "Content-Type: application/json"          \
+                             --header "Accept: application/json"                \
+                             --silent --output /dev/null --write-out %{http_code}                                  \
+                             "$GITLAB_API_URL/$tag_name"                        )
+         if   [ "$resp_status" == "200" ]
+         then TraceStep "deleted gitlab \"tag release\" - id: '$tag_name'"
+         else TraceStep "failed to delete gitlab \"tag release\" - id: '$tag_name', resp $resp_status" ; exit 1 ;
+         fi
+     fi
+
+     ## upload signatures to gitlab "tag release" to
+     ## be referenced when creating the release
+     for upload_file in ${UPLOAD_FILES[@]}
+     do  filename=$(basename $upload_file)
+         TraceStep "uploading '$filename' to gitlab \"tag release\" '$VERSION_STRING'"
+         file_basename=$(basename $upload_file)
+         resp_status=$(curl --request POST --form "file=@$upload_file"       \
+                            --header "PRIVATE-TOKEN: $GITLAB_AUTH_TOKEN" \
+                            --header "Accept: application/json"                \
+                            --silent --output /tmp/$file_basename --write-out %{http_code}                                  \
+                            ${GITLAB_UPLOAD_FILE_URL}                       )
+          if   [ "$resp_status" == "201" ]
+          then TraceStep "uploaded '$upload_file'"
+          else TraceStep "failed to upload '$upload_file'" ; exit 1 ;
+          fi
+     done
+
+     ## create github "tag release"
+     TraceStep "creating gitlab \"tag release\" '$VERSION_STRING'"
+     while read p; do
+       content+="$p\r\n"
+     done <obs/release_notes.md
+     CREATE_RELEASE_JSON="{
+       \"tag_name\": \"$VERSION_STRING\",
+       \"name\": \"$VERSION_STRING\",
+       \"tag_name\": \"$VERSION_STRING\",
+       \"description\": \"$content\",
+       \"assets\": { \"links\": ["
+     for upload_file in ${UPLOAD_FILES[@]}
+     do  filename=$(basename $upload_file)
+       file_url=$(cat /tmp/$filename | jq '.url')
+       file_url=${file_url:1:-1}
+       CREATE_RELEASE_JSON="$CREATE_RELEASE_JSON {
+         \"name\": \"$filename\",
+         \"url\": \"$GITLAB_UPLOADS_URL$file_url\" },"
+       TraceStep "$file_url"
+     done
+     CREATE_RELEASE_JSON="${CREATE_RELEASE_JSON%?} ]
+       } }"
+
+     resp_status=$(curl --request POST --data "$CREATE_RELEASE_JSON"       \
+                        --header "PRIVATE-TOKEN: $GITLAB_AUTH_TOKEN" \
+                        --header "Content-Type: application/json"          \
+                        --header "Accept: application/json"                \
+                        $CURL_STATUS_ARGS                                  \
+                        $GITLAB_API_URL                                    )
+     if   [ "$resp_status" == "201" ]
+     then TraceStep "created gitlab \"tag release\" '$VERSION_STRING'"
+     else TraceStep "failed to create gitlab \"tag release\" '$VERSION_STRING'" ; exit 1 ;
+     fi
+
+
+     ## ensure the new github "tag release" is accessible via the API
+     TraceStep "confirming existence of new gitlab \"tag release\" '$VERSION_STRING'"
+     resp_json=$(curl $CURL_RESP_ARGS --header \"PRIVATE-TOKEN: $GITLAB_AUTH_TOKEN\" $GITLAB_API_URL/$VERSION_STRING)
+     tag_name=$(echo $resp_json | jq '.tag_name')
+     tag_name=${tag_name:1:-1}
+     if [[ $tag_name == $VERSION_STRING ]]
+     then TraceStep "confirmed existence of new gitlab \"tag release\" - id: '$tag_name'"
+     else TraceStep "failed to fetch new gitlab \"tag release\" '$VERSION_STRING'" ; exit 1 ;
+     fi
+
+
+     ## download and verify github "tag release" tarball and PKGBUILD
+     TraceStep "downloading remote tarball, PKGBUILD, and signatures"
+
+     _tarball_url="${GITLAB_REPO}/-/archive/$VERSION_STRING/${UPSTREAM_NAME}-$VERSION_STRING"
+      TraceStep "$_tarball_url"
+     curl $CURL_FETCH_ARGS "$_tarball_url"
+     TARBALL_MD5SUM="$(   md5sum     $TARBALL_FILE | cut --delimiter=' ' --fields=1)"
+     TraceStep "$TARBALL_MD5SUM"
+     TraceStep "curl $CURL_FETCH_ARGS \"$_tarball_url\""
+     curl $CURL_FETCH_ARGS "$GITLAB_UPLOADS_URL/$(cat /tmp/$TARBALL_FILENAME.sig | jq '.url' | sed 's/\"//g')" ;
+     curl $CURL_FETCH_ARGS "$GITLAB_UPLOADS_URL/$(cat /tmp/PKGBUILD | jq '.url' | sed 's/\"//g')" ;
+     curl $CURL_FETCH_ARGS "$GITLAB_UPLOADS_URL/$(cat /tmp/PKGBUILD.sig | jq '.url' | sed 's/\"//g')" ;
+     for remote_file in ${REMOTE_FILENAMES[@]}
+     do  if [ -f $remote_file -a "$(stat --printf='%s' $remote_file)" != "9" ] # 'Not Found'
+         then TraceStep "downloaded $remote_file"
+         else TraceStep "failed to download $remote_file"
+              exit 1
+         fi
+     done
+     if   gpg --verify --verify-options no-show-photos ./$TARBALL_FILENAME.sig 2> /dev/null && \
+          diff $TARBALL_FILE     ./$TARBALL_FILENAME                            > /dev/null && \
+          diff $TARBALL_FILE.sig ./$TARBALL_FILENAME.sig                        > /dev/null && \
+          gpg --verify --verify-options no-show-photos ./PKGBUILD.sig          2> /dev/null && \
+          diff $PKGBUILD_FILE     ./PKGBUILD                                    > /dev/null && \
+          diff $PKGBUILD_FILE.sig ./PKGBUILD.sig                                > /dev/null
+     then TraceStep "verified remote tarball, PKGBUILD, and signatures"
+     else TraceStep "failed to verify remote tarball, PKGBUILD, or signatures"
+          exit 1
+     fi
 
      ### OBS steps ###
 
