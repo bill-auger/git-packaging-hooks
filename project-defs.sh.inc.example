@@ -9,6 +9,12 @@
 #         DEB_TARBALL_FILE:  ${DEBIAN_NAME}_${VERSION}.orig.tar.gz
 #         DEB_DIFFBALL_FILE: ${DEBIAN_NAME}_${VERSION}-1.diff.gz
 
+readonly UPSTREAM_NAME='' # e.g. 'myproject'
+readonly GITLAB_LOGIN='' # e.g. 'gitlab-username'
+readonly GITLAB_AUTH_TOKEN='' # e.g. 'ab123cde...'
+readonly GITLAB_INSTANCE_URL='' # e.g. 'https://git.mydomain.org'
+readonly GITLAB_REPO='' # e.g. '${GITLAB_INSTANCE_URL}/${GITLAB_LOGIN}/${UPSTREAM_NAME}'
+readonly GITLAB_PROJECT_ID='' # e.g. '1' (this is shown in the main project page)
 readonly GITHUB_LOGIN=''                      # e.g. 'my-github-user-name'
 readonly GITHUB_AUTH_TOKEN=''                 # e.g. '0123456789012345678901234567890123456789'
 readonly OBS_LOGIN=''                         # e.g. 'my-opensuse-user-name'

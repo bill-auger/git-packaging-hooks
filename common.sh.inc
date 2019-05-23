@@ -66,10 +66,13 @@ function init()
   readonly FAUX_DSC_MD5SUM='0123456789abcdef0123456789abcdef                                '
   readonly FAUX_DSC_SIZE='1234567'
   readonly GITHUB_API_URL=https://api.github.com/repos/${GITHUB_LOGIN}/${UPSTREAM_NAME}/releases
-  local    tarball_download_url=https://github.com/${GITHUB_LOGIN}/${UPSTREAM_NAME}/archive
-  local    assets_download_url=https://github.com/${GITHUB_LOGIN}/${UPSTREAM_NAME}/releases/download
+  local    github_tarball_download_url=https://github.com/${GITHUB_LOGIN}/${UPSTREAM_NAME}/archive
+  local    github_assets_download_url=https://github.com/${GITHUB_LOGIN}/${UPSTREAM_NAME}/releases/download
   readonly RELEASEID_REGEX='s/^.*\"assets_url\": \"https:\/\/api.github.com\/repos\/'${GITHUB_LOGIN}'\/loopidity\/releases\/\(.*\)\/assets\",.*$/\1/'
   readonly UPLOADURL_REGEX='s/^.*\"upload_url\": \"\(.*\){?.*\",.*$/\1/'
+  readonly GITLAB_API_URL="${GITLAB_INSTANCE_URL}/api/v4/projects/${GITLAB_PROJECT_ID}/releases"
+  local    gitlab_tarball_download_url="${GITLAB_REPO}/-/archive"
+  local    gitlab_assets_download_url="${GITLAB_REPO}/releases"
   readonly CURL_RESP_ARGS='--silent'
   readonly CURL_FETCH_ARGS='--silent --location --remote-name'
   readonly CURL_STATUS_ARGS='--silent --output /dev/null --write-out %{http_code}'
@@ -132,26 +135,38 @@ function init()
   readonly GIT_COMMIT_MSG="update packaging files to $VERSION_STRING"
   readonly OSC_COMMIT_MSG="$VERSION_STRING"
 
-  # github "tag release" params
+  # github/gitlab "tag release" params
   readonly GITHUB_RELEASE_JSON="{ \"tag_name\":         \"$VERSION_STRING\" ,
                                   \"target_commitish\": \"\"                ,
                                   \"name\":             \"$VERSION_STRING\" ,
                                   \"body\":             \"\"                ,
                                   \"draft\":            false               ,
                                   \"prerelease\":       true                }"
+  readonly GITLAB_RELEASE_JSON="{ \"tag_name\":         \"$VERSION_STRING\" ,
+    \"ref\": \"\" ,
+    \"name\": \"$VERSION_STRING\",
+    \"tag_name\": \"$VERSION_STRING\",
+    \"description\": \"changelog\",
+                       }"
 
   # versioned filenames
   readonly TARBALL_FILENAME=$VERSION_STRING.tar.gz
   readonly TARBALL_FILE=../$TARBALL_FILENAME
-  readonly OBS_TARBALL_PATH="\/$GITHUB_LOGIN\/$UPSTREAM_NAME\/archive\/$VERSION_STRING\.tar\.gz"
+  readonly GITHUB_OBS_TARBALL_PATH="\/$GITHUB_LOGIN\/$UPSTREAM_NAME\/archive\/$VERSION_STRING\.tar\.gz"
+  readonly GITLAB_OBS_TARBALL_PATH="\/$UPSTREAM_NAME\/$UPSTREAM_NAME\/-\/archive\/$VERSION_STRING\/$UPSTREAM_NAME-$VERSION_STRING\.tar\.gz"
   readonly DEB_PREFIX=${DEBIAN_NAME}_${VERSION}
   readonly DEB_TARBALL_FILENAME=${DEB_PREFIX}.orig.tar.gz
   readonly DEB_DIFFBALL_FILENAME=${DEB_PREFIX}-1.diff.gz
-  readonly TARBALL_INNER_DIR=${UPSTREAM_NAME}-${VERSION}
-  readonly TARBALL_URL=${tarball_download_url}/${TARBALL_FILENAME}
-  readonly TARBALL_SIG_URL=${assets_download_url}/${VERSION_STRING}/${TARBALL_FILENAME}.sig
-  readonly PKGBUILD_URL=${assets_download_url}/${VERSION_STRING}/PKGBUILD
-  readonly PKGBUILD_SIG_URL=${assets_download_url}/${VERSION_STRING}/PKGBUILD.sig
+  readonly GITHUB_TARBALL_INNER_DIR=${UPSTREAM_NAME}-${VERSION}
+  readonly GITLAB_TARBALL_INNER_DIR=${UPSTREAM_NAME}-v${VERSION}
+  readonly GITHUB_TARBALL_URL=${github_tarball_download_url}/${TARBALL_FILENAME}
+  readonly GITLAB_TARBALL_URL=${gitlab_tarball_download_url}/${TARBALL_FILENAME}
+  readonly GITHUB_TARBALL_SIG_URL=${github_assets_download_url}/${VERSION_STRING}/${TARBALL_FILENAME}.sig
+  readonly GITHUB_PKGBUILD_URL=${github_assets_download_url}/${VERSION_STRING}/PKGBUILD
+  readonly GITHUB_PKGBUILD_SIG_URL=${github_assets_download_url}/${VERSION_STRING}/PKGBUILD.sig
+  readonly GITLAB_PKGBUILD_URL=${gitlab_assets_download_url}/${VERSION_STRING}/PKGBUILD
+  readonly GITLAB_PKGBUILD_SIG_URL=${gitlab_assets_download_url}/${VERSION_STRING}/PKGBUILD.sig
+  readonly GITLAB_UPLOAD_FILE_URL="${GITLAB_INSTANCE_URL}/api/v4/projects/${GITLAB_PROJECT_ID}/uploads"
 
 # source $(git config --local core.hooksPath)/debug-constants.sh.inc # DEBUG
 # exit 1 # debug
